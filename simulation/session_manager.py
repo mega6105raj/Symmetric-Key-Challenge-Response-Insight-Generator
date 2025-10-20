@@ -474,12 +474,29 @@ class SessionManager:
             return
         df = pd.DataFrame(self.records)
         out_path = os.path.join(DATA_DIR, DATASET_FILENAME)
+        # write file (append or overwrite)
         if partial and os.path.exists(out_path):
-            # append
             df.to_csv(out_path, mode="a", header=False, index=False)
         else:
             df.to_csv(out_path, index=False)
-        print(f"[SessionManager] Wrote {len(self.records)} records to {out_path} (partial={partial})")
+
+        # gather some diagnostics so callers can verify which file was written
+        try:
+            abs_path = os.path.abspath(out_path)
+            exists = os.path.exists(abs_path)
+            fsize = os.path.getsize(abs_path) if exists else 0
+            mtime = os.path.getmtime(abs_path) if exists else None
+            mtime_str = time.ctime(mtime) if mtime else "<not present>"
+        except Exception:
+            abs_path = out_path
+            fsize = 0
+            mtime_str = "<error>"
+
+        print(f"[SessionManager] Wrote {len(self.records)} records to {abs_path} (partial={partial}) size={fsize} bytes mtime={mtime_str}")
+
+        # clear the in-memory records after flushing so subsequent flushes only write new records
+        with self._lock:
+            self.records = []
 
 # If executed as a script, run a small demo
 if __name__ == "__main__":

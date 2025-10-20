@@ -7,7 +7,7 @@ from simulation.session_manager import SessionManager
 
 if __name__ == '__main__':
   # run: sessions, attacker disabled (requested)
-  sm = SessionManager(num_sessions=5, enable_attacker=False)
+  sm = SessionManager(num_sessions=500, enable_attacker=False)
   try:
     sm.run()
   finally:

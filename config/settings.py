@@ -33,7 +33,7 @@ CONNECTION_TIMEOUT = 5 #Seconds before socket timeout
 # Make data/log paths absolute (based on repository layout) so runs write to a
 # consistent place regardless of the current working directory.
 import os
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 DATA_DIR = os.path.join(_ROOT, 'data', 'results')
 LOG_DIR = os.path.join(_ROOT, 'data', 'logs')
 TEMP_DIR = os.path.join(_ROOT, 'data', 'temp')
