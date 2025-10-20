@@ -177,7 +177,18 @@ class SessionManager:
                 with self._lock:
                     self.session_state[sid]["alice_response"] = alice_finalize_struct["c2_hex"]
                     self.session_state[sid]["alice_final_sent"] = True
-                    self.session_state[sid]["nonce_entropy"] = combined_entropy(bytes.fromhex(self.session_state[sid]["ra"]), bytes.fromhex(self.session_state[sid]["rb"]))
+                    # compute nonce entropy only if both RA and RB hex values are present and valid
+                    try:
+                        ra_hex = self.session_state[sid].get("ra")
+                        rb_hex = self.session_state[sid].get("rb")
+                        ra_bytes = bytes.fromhex(ra_hex) if ra_hex else None
+                        rb_bytes = bytes.fromhex(rb_hex) if rb_hex else None
+                        if ra_bytes and rb_bytes:
+                            self.session_state[sid]["nonce_entropy"] = combined_entropy(ra_bytes, rb_bytes)
+                        else:
+                            self.session_state[sid]["nonce_entropy"] = None
+                    except Exception:
+                        self.session_state[sid]["nonce_entropy"] = None
         else:
             # failed: record error in session_state if known
             if sid is not None:
@@ -202,10 +213,9 @@ class SessionManager:
                     # we need the original RB bytes to compute expected ciphertext for verification
                     expected_rb_hex = s.get("rb")
                     if expected_rb_hex:
-                        if bytes.fromhex(expected_rb_hex) and True:
-                            # check if this session's RB equals one in record: we'll simply accept first unmatched one-way
-                            sid = s_id
-                            break
+                        # accept first unmatched one-way where RB exists
+                        sid = s_id
+                        break
 
         # For one-way, Bob verifies by decrypting resp and comparing to RB
         # But we don't have decrypt_message here; use protocol_oneway.bob_verify_response
@@ -224,7 +234,8 @@ class SessionManager:
                 "bob_response": None,
                 "success": bool(verify.get("success")),
                 "timestamp": self.session_state[sid].get("timestamp"),
-                "response_time": None,  # could calculate using timestamps if desired
+                # compute response_time as time since session timestamp when Bob handled the response
+                "response_time": (time.time() - self.session_state[sid].get("timestamp")) if self.session_state[sid].get("timestamp") else None,
                 "attack_flag": bool(self.session_state[sid].get("attack_flag")),
                 "nonce_entropy": self.session_state[sid].get("nonce_entropy"),
                 "is_replay": bool(self.session_state[sid].get("is_replay")),
@@ -259,7 +270,7 @@ class SessionManager:
                 "bob_response": self.session_state[sid].get("bob_response"),
                 "success": bool(verify.get("success")),
                 "timestamp": self.session_state[sid].get("timestamp"),
-                "response_time": None,
+                "response_time": (time.time() - self.session_state[sid].get("timestamp")) if self.session_state[sid].get("timestamp") else None,
                 "attack_flag": bool(self.session_state[sid].get("attack_flag")),
                 "nonce_entropy": self.session_state[sid].get("nonce_entropy"),
                 "is_replay": bool(self.session_state[sid].get("is_replay")),
@@ -369,8 +380,13 @@ class SessionManager:
                     self.bob.send("Alice", {"type": "challenge_rb", "from": "Bob", "rb": rb_bytes_to_send})
 
                     # we expect Alice to respond and our bob.on_response_rb handler will be invoked which will log the session
-                    # wait small time for flow to complete
-                    time.sleep(0.02)
+                    # actively wait for the session to be marked logged (avoid racing past callbacks)
+                    wait_start = time.time()
+                    while time.time() - wait_start < 0.5:
+                        with self._lock:
+                            if self.session_state.get(sid, {}).get("logged"):
+                                break
+                        time.sleep(0.001)
 
                 else:
                     # Two-way orchestration: Alice initiates with RA -> Bob
@@ -390,9 +406,20 @@ class SessionManager:
 
                     # Alice sends RA to Bob (Alice -> Bob)
                     self.alice.send("Bob", {"type": "init_ra", "from": "Alice", "ra": ra_bytes_to_send})
-
                     # Bob's on_init_ra will create rb and send c1 to Alice; then Alice's on_bob_ra_rb will send c2; orchestrator will verify when Bob receives c2
-                    time.sleep(0.04)
+                    # actively wait for the session to be marked logged (two-way handshake)
+                    wait_start = time.time()
+                    while time.time() - wait_start < 0.5:
+                        with self._lock:
+                            if self.session_state.get(sid, {}).get("logged"):
+                                break
+                        time.sleep(0.001)
+                        wait_start = time.time()
+                        while time.time() - wait_start < 0.5:
+                            with self._lock:
+                                if self.session_state.get(sid, {}).get("logged"):
+                                    break
+                            time.sleep(0.001)
 
                 # occasionally let the system settle, and periodically save partial dataset
                 if sid % SAVE_INTERVAL == 0 and sid > 0:
@@ -412,8 +439,8 @@ class SessionManager:
                         if s.get("alice_response") and s.get("rb"):
                             # verify
                             try:
-                                rb_bytes = bytes.fromhex(s["rb"])
-                                alice_cipher_bytes = bytes.fromhex(s["alice_response"])
+                                rb_bytes = bytes.fromhex(s["rb"]) if s.get("rb") else None
+                                alice_cipher_bytes = bytes.fromhex(s["alice_response"]) if s.get("alice_response") else None
                                 verify = protocol_oneway.bob_verify_response(rb_bytes, alice_cipher_bytes, self.shared_key)
                                 rec = {
                                     "protocol_type": "one-way",
@@ -438,7 +465,7 @@ class SessionManager:
                         # try to verify if we have both alice_response and bob_response
                         if s.get("alice_response") and s.get("bob_response") and s.get("rb_bytes"):
                             try:
-                                c2_bytes = bytes.fromhex(s["alice_response"])
+                                c2_bytes = bytes.fromhex(s["alice_response"]) if s.get("alice_response") else None
                                 rb_bytes = s.get("rb_bytes")
                                 verify = protocol_twoway.bob_verify_final(rb_bytes, c2_bytes, self.shared_key)
                                 rec = {
@@ -462,6 +489,15 @@ class SessionManager:
                                 pass
 
             # final save
+            # diagnostics summary: how many sessions created vs logged
+            with self._lock:
+                total_sessions = len(self.session_state)
+                logged_count = sum(1 for s in self.session_state.values() if s.get("logged"))
+                alice_resp_count = sum(1 for s in self.session_state.values() if s.get("alice_response"))
+                bob_resp_count = sum(1 for s in self.session_state.values() if s.get("bob_response"))
+                unlogged = total_sessions - logged_count
+            print(f"[SessionManager] Diagnostics: sessions_created={total_sessions} logged={logged_count} alice_resp={alice_resp_count} bob_resp={bob_resp_count} unlogged={unlogged}")
+
             self._flush_records_to_csv(partial=False)
         finally:
             self.stop_components()
@@ -474,11 +510,9 @@ class SessionManager:
             return
         df = pd.DataFrame(self.records)
         out_path = os.path.join(DATA_DIR, DATASET_FILENAME)
-        # write file (append or overwrite)
-        if partial and os.path.exists(out_path):
-            df.to_csv(out_path, mode="a", header=False, index=False)
-        else:
-            df.to_csv(out_path, index=False)
+        # Always append to the dataset file. Write header only if the file does not exist yet.
+        write_header = not os.path.exists(out_path)
+        df.to_csv(out_path, mode="a", header=write_header, index=False)
 
         # gather some diagnostics so callers can verify which file was written
         try:
