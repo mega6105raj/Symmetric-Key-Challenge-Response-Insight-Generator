@@ -13,27 +13,15 @@ from sklearn.metrics import classification_report, confusion_matrix, accuracy_sc
 import warnings
 warnings.filterwarnings('ignore')
 
-# ---------------------------
-# 1. Load Data
-# ---------------------------
 df = pd.read_csv("C:\\Users\\mega6\\OneDrive\\Desktop\\Symmetric-Key-Challenge-Response-Insight-Generator\\data\\results\\auth_dataset.csv")
 
-# ---------------------------
-# 2. Basic Cleaning
-# ---------------------------
 df['response_time'] = df['response_time'].fillna(df['response_time'].median())
 df['nonce_entropy'] = df['nonce_entropy'].fillna(df['nonce_entropy'].median())
 
-# ---------------------------
-# 3. Convert Boolean/Text Columns to Numeric
-# ---------------------------
 bool_cols = ['success', 'attack_flag', 'is_replay', 'is_random_guess']
 for col in bool_cols:
     df[col] = df[col].astype(str).str.lower().map({'true': 1, 'false': 0})
 
-# ---------------------------
-# 4. Create Multiclass Target
-# ---------------------------
 def label_attack_type(row):
     if row['attack_flag'] == 0:
         return 0  # no attack
@@ -46,14 +34,10 @@ def label_attack_type(row):
 
 df['attack_type'] = df.apply(label_attack_type, axis=1)
 
-# ---------------------------
-# 5. Feature Engineering
-# ---------------------------
-# (a) Nonce lengths
+
 df['ra_len'] = df['ra'].fillna('').apply(len)
 df['rb_len'] = df['rb'].fillna('').apply(len)
 
-# (b) Nonce similarity (basic hex comparison)
 def hex_similarity(a, b):
     if pd.isna(a) or pd.isna(b) or len(a) == 0 or len(b) == 0:
         return 0
@@ -61,19 +45,12 @@ def hex_similarity(a, b):
 
 df['nonce_similarity'] = df.apply(lambda x: hex_similarity(x['ra'], x['rb']), axis=1)
 
-# (c) Timestamp-based feature
 df = df.sort_values(by='timestamp')
 df['time_diff'] = df['timestamp'].diff().fillna(0)
 
-# ---------------------------
-# 6. Encode Protocol Type
-# ---------------------------
 le = LabelEncoder()
 df['protocol_type_enc'] = le.fit_transform(df['protocol_type'])
 
-# ---------------------------
-# 7. Select Features & Target
-# ---------------------------
 features = [
     'protocol_type_enc',
     'response_time',
@@ -88,38 +65,23 @@ features = [
 X = df[features]
 y = df['attack_type']
 
-# ---------------------------
-# 8. Scale Numeric Features
-# ---------------------------
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
-# ---------------------------
-# 9. Train/Test Split
-# ---------------------------
 X_train, X_test, y_train, y_test = train_test_split(
     X_scaled, y, test_size=0.2, random_state=42, stratify=y
 )
 
-# ---------------------------
-# 10. Train Model (Random Forest)
-# ---------------------------
 rf = RandomForestClassifier(
     n_estimators=300, random_state=42, class_weight='balanced_subsample'
 )
 rf.fit(X_train, y_train)
 
-# ---------------------------
-# 11. Evaluate Model
-# ---------------------------
 y_pred = rf.predict(X_test)
 
 print("Accuracy:", accuracy_score(y_test, y_pred))
 print("\nConfusion Matrix:\n", confusion_matrix(y_test, y_pred))
 print("\nClassification Report:\n", classification_report(y_test, y_pred, target_names=['no_attack','replay','random_guess']))
 
-# ---------------------------
-# 12. Feature Importance
-# ---------------------------
 importances = pd.Series(rf.feature_importances_, index=features).sort_values(ascending=False)
 print("\nFeature Importances:\n", importances)
