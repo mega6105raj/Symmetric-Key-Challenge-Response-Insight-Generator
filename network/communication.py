@@ -15,12 +15,17 @@ def hex_to_bytes(h: Optional[str]) -> Optional[bytes]:
     return None if h is None else bytes.fromhex(h)
 
 def _prepare_for_send(obj: Dict[str, Any]) -> bytes:
-    safe = {}
-    for k, v in obj.items():
-        if isinstance(v, (bytes, bytearray)):
-            safe[k] = v.hex()
-        else:
-            safe[k] = v
+    def _to_safe(val: Any):
+        # recursively convert bytes/bytearray to hex strings inside nested structures
+        if isinstance(val, (bytes, bytearray)):
+            return val.hex()
+        if isinstance(val, dict):
+            return {k: _to_safe(v) for k, v in val.items()}
+        if isinstance(val, (list, tuple)):
+            return [_to_safe(v) for v in val]
+        return val
+
+    safe = _to_safe(obj)
     return json.dumps(safe, separators=(",", ":"), sort_keys=False).encode("utf-8")
 
 def _post_recv(obj: Dict[str, Any]) -> Dict[str, Any]:

@@ -13,6 +13,7 @@ Callbacks:
 import socket
 import threading
 import logging
+import time
 from typing import Callable, Optional
 from .communication import send_msg, recv_msg
 
@@ -32,12 +33,21 @@ class BobClient(threading.Thread):
         self.on_response_rb: Optional[Callable[[dict], None]] = None
 
     def connect_and_register(self, timeout: float = 5.0):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(timeout)
-        s.connect((self.router_host, self.router_port))
-        send_msg(s, {"type": "register", "name": self.name})
-        self.sock = s
-        s.settimeout(None)
+        attempts = 0
+        while True:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(timeout)
+                s.connect((self.router_host, self.router_port))
+                send_msg(s, {"type": "register", "name": self.name})
+                self.sock = s
+                s.settimeout(None)
+                return
+            except Exception:
+                attempts += 1
+                if attempts >= 10:
+                    raise
+                time.sleep(0.1)
 
     def send(self, to: str, payload: dict):
         if not self.sock:

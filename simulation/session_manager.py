@@ -275,7 +275,7 @@ class SessionManager:
     def start_components(self):
         # start router
         self.router.start()
-        time.sleep(0.1)  # allow server to start
+        time.sleep(0.5)  # allow server to start
 
         # start Alice and Bob clients and register callbacks
         # If they are not connected yet, AliceClient/BobClient will call connect on run()
@@ -289,6 +289,13 @@ class SessionManager:
 
         self.alice.start()
         self.bob.start()
+
+        # wait for clients to establish connections to the router (avoid race)
+        wait_start = time.time()
+        while time.time() - wait_start < 5.0:
+            if getattr(self.alice, "sock", None) is not None and getattr(self.bob, "sock", None) is not None:
+                break
+            time.sleep(0.05)
 
         # start attacker client if enabled (for active injection)
         if self.enable_attacker:

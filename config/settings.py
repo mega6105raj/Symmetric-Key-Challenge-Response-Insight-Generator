@@ -30,13 +30,19 @@ BUFFER_SIZE = 4096 #Socket buffer size in bytes
 CONNECTION_TIMEOUT = 5 #Seconds before socket timeout
 
 #Data Logging and Storage
-DATA_DIR = "data/results/" #Folder to save datasets
-LOG_DIR = "data/logs/" #Folder for individual session logs
-TEMP_DIR = "data/temp/" #Temporary socket logs or partial messages
+# Make data/log paths absolute (based on repository layout) so runs write to a
+# consistent place regardless of the current working directory.
+import os
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+DATA_DIR = os.path.join(_ROOT, 'data', 'results')
+LOG_DIR = os.path.join(_ROOT, 'data', 'logs')
+TEMP_DIR = os.path.join(_ROOT, 'data', 'temp')
 DATASET_FILENAME = "auth_dataset.csv"
 
 SAVE_RAW_MESSAGES = True #If True, store message-level traces for analysis
 SAVE_INTERNAL = 100 #Save dataset to file every N sessions
+# backward-compatibility alias: older code expected SAVE_INTERVAL
+SAVE_INTERVAL = SAVE_INTERNAL
 
 #Attacker settings
 ENABLE_ATTACKER_THREAD = True #Whether to spawn an active attacker
