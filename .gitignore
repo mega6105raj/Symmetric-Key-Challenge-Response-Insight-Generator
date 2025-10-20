@@ -1,0 +1,17 @@
+# Virtual environment
+.venv/
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# OS files
+.DS_Store
+
+# Don't ignore data/results — user asked to include the dataset in the repo
+# Keep logs/temp out
+data/logs/
+data/temp/
+
+# environment
+.env
