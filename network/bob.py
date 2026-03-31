@@ -16,6 +16,7 @@ import logging
 import time
 from typing import Callable, Optional
 from .communication import send_msg, recv_msg
+import ssl
 
 log = logging.getLogger("network.bob")
 
@@ -33,19 +34,31 @@ class BobClient(threading.Thread):
         self.on_response_rb: Optional[Callable[[dict], None]] = None
 
     def connect_and_register(self, timeout: float = 5.0):
+        print(f"[Bob] Starting TLS connection to {self.router_host}:{self.router_port}")
         attempts = 0
         while True:
             try:
+                # TLS context setup
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
+                context.maximum_version = ssl.TLSVersion.TLSv1_3
+                context.load_cert_chain(certfile="certs/bob.crt", keyfile="certs/bob.pem")
+
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.settimeout(timeout)
                 s.connect((self.router_host, self.router_port))
-                send_msg(s, {"type": "register", "name": self.name})
-                self.sock = s
-                s.settimeout(None)
+                tls_sock = context.wrap_socket(s, server_side=False, do_handshake_on_connect=True)
+                print("[Bob] TLS handshake successful. Registering...")
+                send_msg(tls_sock, {"type": "register", "name": self.name})
+                self.sock = tls_sock
+                tls_sock.settimeout(None)
+                print("[Bob] Registered and ready.")
                 return
-            except Exception:
+            except Exception as e:
+                print(f"[Bob] Connection attempt {attempts+1} failed: {e}")
                 attempts += 1
                 if attempts >= 10:
+                    print("[Bob] Failed to connect after 10 attempts.")
                     raise
                 time.sleep(0.1)
 
@@ -55,15 +68,17 @@ class BobClient(threading.Thread):
         send_msg(self.sock, {"type": "send", "to": to, "payload": payload})
 
     def run(self):
+        print("[Bob] Thread started.")
         if not self.sock:
             self.connect_and_register()
-        log.info("Bob connected & registered")
+        print("[Bob] Connected & registered. Listening for messages...")
         while self.running.is_set():
             msg = recv_msg(self.sock, timeout=1.0)
             if msg is None:
                 continue
             t = msg.get("type")
             try:
+                print(f"[Bob] Received message of type: {t}")
                 if t == "init_ra":
                     if self.on_init_ra:
                         self.on_init_ra(msg)
@@ -71,9 +86,9 @@ class BobClient(threading.Thread):
                     if self.on_response_rb:
                         self.on_response_rb(msg)
                 else:
-                    pass
+                    print(f"[Bob] Unknown message type: {t}")
             except Exception as e:
-                log.exception("Bob handler raised: %s", e)
+                print(f"[Bob] Handler exception: {e}")
 
     def stop(self):
         self.running.clear()

@@ -261,14 +261,38 @@ def main():
     show_full_tables = st.sidebar.checkbox("Show full dataset tables (may be large)", value=False)
     # persist into session_state for use by other functions
     st.session_state['show_full_tables'] = show_full_tables
-    page = st.sidebar.selectbox("Go to", ["Generate Dataset", "Run Simulation", "Data & Logs"])
+    page = st.sidebar.selectbox("Go to", ["Generate Dataset", "Run Simulation", "Data & Logs", "TLS Channel Demo"])
 
     if page == "Generate Dataset":
         page_generate_dataset()
     elif page == "Run Simulation":
         page_run_simulation()
+    elif page == "TLS Channel Demo":
+        page_tls_channel_demo()
     else:
         page_view_data_and_logs()
+def page_tls_channel_demo():
+    st.header("TLS Channel Demo: Alice & Bob")
+    st.write("Start Alice and Bob as TLS client/server and view live output.")
+
+    if st.button("Establish TLS Connection (Alice & Bob)"):
+        st.write("Starting Bob...")
+        bob_args = ['-m', 'network.bob']
+        bob_code, bob_out, bob_elapsed = run_script_stream(bob_args, timeout=60, text_area_height=150)
+        st.write(f"Bob return code: {bob_code}  Elapsed: {bob_elapsed:.1f}s")
+        st.text_area("Bob output", bob_out, height=150)
+
+        st.write("Starting Alice...")
+        alice_args = ['-m', 'network.alice']
+        alice_code, alice_out, alice_elapsed = run_script_stream(alice_args, timeout=60, text_area_height=150)
+        st.write(f"Alice return code: {alice_code}  Elapsed: {alice_elapsed:.1f}s")
+        st.text_area("Alice output", alice_out, height=150)
+
+        # Check for connection success in output
+        if ("TLS handshake successful" in bob_out and "TLS handshake successful" in alice_out) or ("Registered and ready" in bob_out and "Registered and ready" in alice_out):
+            st.success("TLS channel established between Alice and Bob!")
+        else:
+            st.warning("Could not confirm TLS channel establishment. Check output above for errors.")
 
 
 if __name__ == '__main__':

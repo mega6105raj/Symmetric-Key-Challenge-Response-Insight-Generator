@@ -15,3 +15,12 @@ data/temp/
 
 # environment
 .env
+
+# Certificates and keys
+*.pem
+*.crt
+*.pfx
+certs/
+
+# Logs
+*.log

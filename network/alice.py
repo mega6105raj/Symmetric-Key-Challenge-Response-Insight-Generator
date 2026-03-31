@@ -15,6 +15,7 @@ import time
 import logging
 from typing import Callable, Optional
 from .communication import send_msg, recv_msg
+import ssl
 
 log = logging.getLogger("network.alice")
 
@@ -33,21 +34,32 @@ class AliceClient(threading.Thread):
         self.on_bob_ra_rb: Optional[Callable[[dict], None]] = None
 
     def connect_and_register(self, timeout: float = 5.0):
-        # retry loop to handle router startup race or transient errors
+        print(f"[Alice] Starting TLS connection to {self.router_host}:{self.router_port}")
         attempts = 0
         while True:
             try:
+                # TLS context setup
+                context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
+                context.maximum_version = ssl.TLSVersion.TLSv1_3
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.settimeout(timeout)
                 s.connect((self.router_host, self.router_port))
-                send_msg(s, {"type": "register", "name": self.name})
-                self.sock = s
-                # set blocking mode for normal recv
-                s.settimeout(None)
+                tls_sock = context.wrap_socket(s, server_hostname=self.router_host)
+                print("[Alice] TLS handshake successful. Registering...")
+                send_msg(tls_sock, {"type": "register", "name": self.name})
+                self.sock = tls_sock
+                tls_sock.settimeout(None)
+                print("[Alice] Registered and ready.")
                 return
-            except Exception:
+            except Exception as e:
+                print(f"[Alice] Connection attempt {attempts+1} failed: {e}")
                 attempts += 1
                 if attempts >= 10:
+                    print("[Alice] Failed to connect after 10 attempts.")
                     raise
                 time.sleep(0.1)
 
@@ -57,15 +69,17 @@ class AliceClient(threading.Thread):
         send_msg(self.sock, {"type": "send", "to": to, "payload": payload})
 
     def run(self):
+        print("[Alice] Thread started.")
         if not self.sock:
             self.connect_and_register()
-        log.info("Alice connected & registered")
+        print("[Alice] Connected & registered. Listening for messages...")
         while self.running.is_set():
             msg = recv_msg(self.sock, timeout=1.0)
             if msg is None:
                 continue
             t = msg.get("type")
             try:
+                print(f"[Alice] Received message of type: {t}")
                 if t == "challenge_rb":
                     if self.on_challenge_rb:
                         self.on_challenge_rb(msg)
@@ -73,10 +87,9 @@ class AliceClient(threading.Thread):
                     if self.on_bob_ra_rb:
                         self.on_bob_ra_rb(msg)
                 else:
-                    # unknown or unused type
-                    pass
+                    print(f"[Alice] Unknown message type: {t}")
             except Exception as e:
-                log.exception("Alice handler raised: %s", e)
+                print(f"[Alice] Handler exception: {e}")
 
     def stop(self):
         self.running.clear()
